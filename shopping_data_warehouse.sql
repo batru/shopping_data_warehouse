@@ -20,121 +20,143 @@ CREATE TABLE shopping (
 COPY dev.public.shopping FROM 's3url' IAM_ROLE 'iam_role url' FORMAT AS CSV DELIMITER ',' QUOTE '"' IGNOREHEADER 1 REGION AS 'your-s3-region'
 -- Replace dev with your db, s3url with your s3url, iam_role url with your iam_role url and region with your s3 region
 
-SELECT * FROM shopping;
 
--- create a dimension TABLE
-CREATE TABLE dim_gender (ID INT PRIMARY KEY , gender_type VARCHAR(50));
+-- create a dimension table gender
+CREATE TABLE dim_gender (
+    gender_id INT PRIMARY KEY,  -- A unique ID for the gender
+    gender_type VARCHAR(50)     -- Gender type (e.g., Male, Female)
+);
 
--- insert data into the dimension TABLE
-INSERT INTO dim_gender (ID, gender_type)
-SELECT customer_id, gender FROM shopping;
+-- Insert data into dim_gender, automatically assigning IDs to gender types
+INSERT INTO dim_gender (gender_id, gender_type)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY gender) AS gender_id,  -- Automatically generate gender_id
+    gender AS gender_type                             -- Gender type (Male or Female)
+FROM 
+    (SELECT DISTINCT gender FROM shopping) AS distinct_genders;
 
--- select data from dimension TABLE
+-- Select the data from dim_gender to verify
 SELECT * FROM dim_gender;
 
--- create a fact TABLE
-CREATE TABLE fact_table (ID INT PRIMARY KEY, age INT , review_rating DECIMAL(3,1), previous_purchases INT);
+CREATE TABLE dim_category (
+    category_id INT PRIMARY KEY,  -- Unique ID for each category
+    category_name VARCHAR(50)     -- Product category (e.g., Clothing, Footwear)
+);
 
--- insert data into the fact TABLE
-INSERT INTO fact_table (ID, age, review_rating, previous_purchases)
-SELECT customer_id, age, review_rating, previous_purchases FROM shopping;
+INSERT INTO dim_category (category_id, category_name)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY category) AS category_id, 
+    category AS category_name
 
--- select data from fact TABLE
-SELECT * FROM fact_table;
+FROM 
+    (SELECT DISTINCT category FROM shopping) AS distinct_category;
 
-
--- Business question
--- product category with high review rating 
--- Threshold is above avreage review rating
-
--- create a dimension category TABLE
-CREATE TABLE dim_category (ID INT PRIMARY KEY, category VARCHAR(50));
-
--- insert data into the TABLE
-INSERT INTO dim_category (ID, category)
-SELECT customer_id, category FROM shopping;
-
--- select data from TABLE
+-- Select the data from dim_category to verify
 SELECT * FROM dim_category;
 
--- join the tables
+CREATE TABLE dim_season (
+    season_id INT PRIMARY KEY,  -- Unique ID for each season
+    season_name VARCHAR(20)     -- Season name (e.g., Winter, Spring)
+);
+
+INSERT INTO dim_season (season_id, season_name)
 SELECT 
-    dc.category, 
-    AVG(ft.review_rating) AS avg_review_rating
-FROM 
-    fact_table ft
-JOIN 
-    dim_category dc ON dc.ID = ft.ID
-GROUP BY 
-    dc.category
-HAVING 
-    AVG(ft.review_rating) > (SELECT AVG(review_rating) FROM fact_table)
-ORDER BY 
-    avg_review_rating DESC;
+    ROW_NUMBER() OVER( ORDER BY season) AS season_id, 
+    season AS season_name
+FROM (SELECT DISTINCT season FROM shopping) AS season_category;
 
+SELECT * FROM dim_season;
 
-    -- Business question 2
+CREATE TABLE dim_frequency (
+    frequency_id INT PRIMARY KEY,  -- Unique ID for each frequency
+    frequency_name VARCHAR(20)     -- Frequency of purchases (e.g., Weekly, Monthly)
+);
 
-
--- what is the most frequecy of purchase per each season
-
--- create a dimension Season TABLE
-CREATE TABLE dim_season (ID INT PRIMARY KEY, season VARCHAR(50));
-
--- insert data into the TABLE
-INSERT INTO dim_season (ID, season)
-SELECT customer_id, season FROM shopping;
-
-select * from dim_season;
-
--- create a dimension frequency of purchase TABLE
-CREATE TABLE dim_frequency (ID INT PRIMARY KEY, frequency_of_purchases VARCHAR(20));
-
--- insert data into the TABLE
-INSERT INTO dim_frequency (ID, frequency_of_purchases)
-SELECT customer_id, frequency_of_purchases  FROM shopping;
-
--- step 1: Join the Fact Table with the Time Dimension and the Frequency of Purchases Dimension
+INSERT INTO dim_frequency (frequency_id, frequency_name)
 SELECT 
-    ds.season, 
-    df.frequency_of_purchases, 
-    COUNT(df.frequency_of_purchases) AS frequency_count
-FROM 
-    fact_table ft
-JOIN 
-    dim_season ds ON ft.id = ds.ID  
+    ROW_NUMBER() OVER( ORDER BY frequency_of_purchases) AS frequency_id, 
+    frequency_of_purchases AS frequency_name
+FROM (SELECT DISTINCT frequency_of_purchases FROM shopping) AS frequency_category;
+
+SELECT * FROM dim_frequency;
+
+-- Fact TABLE
+CREATE TABLE fact_table (
+    fact_id INT PRIMARY KEY,        -- Fact table ID (use an auto-incrementing ID)
+    age INT,               
+    review_rating DECIMAL(3,1),     -- Fact: Review rating for the purchase
+    previous_purchases INT,         -- Fact: Total previous purchases by the customer
+    category_id INT,                -- Foreign key to category
+    season_id INT,                  -- Foreign key to season
+    frequency_id INT,               -- Foreign key to frequency
     
-JOIN 
-    dim_frequency df ON ft.id = df.ID  
-GROUP BY 
-    ds.season, df.frequency_of_purchases
-ORDER BY 
-    ds.season, frequency_count DESC;
+    FOREIGN KEY (category_id) REFERENCES dim_category(category_id),
+    FOREIGN KEY (season_id) REFERENCES dim_season(season_id),
+    FOREIGN KEY (frequency_id) REFERENCES dim_frequency(frequency_id)
+);
 
--- step 2: Rank the result and get only the most frequency of purchase by each season
+-- insert data into fact TABLE
+INSERT INTO fact_table (fact_id, age, review_rating, previous_purchases, category_id, season_id, frequency_id)
+SELECT 
+    s.customer_id, 
+    s.age,
+    s.review_rating, 
+    s.previous_purchases, 
+    dc.category_id, 
+    ds.season_id, 
+    df.frequency_id
+FROM 
+    shopping s
+JOIN 
+    dim_category dc ON dc.category_name = s.category
+JOIN 
+    dim_season ds ON ds.season_name = s.season
+JOIN 
+    dim_frequency df ON df.frequency_name = s.frequency_of_purchases;
+
+-- Business Queries
+-- 1. Products with High Review Rating (Above Average)
+-- Now, let's query products (categories) that have an average review rating above the overall average review rating.
+
+SELECT 
+    dc.category_name, 
+    MAX(ft.review_rating) AS high_review_rating
+FROM 
+    fact_table ft
+JOIN 
+    dim_category dc ON dc.category_id = ft.category_id
+GROUP BY 
+    dc.category_name
+ORDER BY 
+    high_review_rating DESC;
+
+-- 2. Most Frequent Frequency of Purchase Per Each Season
+-- For this query, we'll find the most frequent frequency of purchase per each season.
 WITH ranked_frequencies AS (
     SELECT 
-        ds.season,
-        df.frequency_of_purchases, 
-        COUNT(df.frequency_of_purchases) AS frequency_count,
-        RANK() OVER (PARTITION BY ds.season ORDER BY COUNT(df.frequency_of_purchases) DESC) AS rank
+        ds.season_name,
+        df.frequency_name, 
+        COUNT(df.frequency_name) AS frequency_count,
+        RANK() OVER (PARTITION BY ds.season_name ORDER BY COUNT(df.frequency_name) DESC) AS rank
     FROM 
-        fact_table AS ft 
+        fact_table ft
     JOIN 
-        dim_season AS ds ON ds.ID = ft.ID
-    JOIN
-        dim_frequency AS df on df.ID = ft.ID
+        dim_season ds ON ds.season_id = ft.season_id
+    JOIN 
+        dim_frequency df ON df.frequency_id = ft.frequency_id
     GROUP BY 
-        ds.season, df.frequency_of_purchases
+        ds.season_name, df.frequency_name
 )
-
 SELECT 
-    season, 
-    frequency_of_purchases, 
+    season_name, 
+    frequency_name, 
     frequency_count
 FROM 
     ranked_frequencies
 WHERE 
     rank = 1
 ORDER BY 
-    season;
+    season_name;
+
+
+
