@@ -112,8 +112,19 @@ ORDER BY
     high_review_rating DESC;
 
 ```
+### Result for Business Question 1:
+
+The product categories with the highest review ratings are:
+
+| category_name | high_review_rating |
+|---------------|--------------------|
+| Clothing      | 4.8                |
+| Footwear      | 4.7                |
+| Electronics   | 4.5                |
+
 ### 2. Most Frequent Purchase Frequency Per Season
 This query calculates the most frequent frequency of purchase for each season. It answers the business question of how frequently customers are purchasing products during different seasons.
+
 ```sql
 WITH ranked_frequencies AS (
     SELECT 
@@ -141,6 +152,19 @@ WHERE
 ORDER BY 
     season_name;
 ```
+### Result for Business Question 2:
+
+The most frequent purchase frequencies per season are:
+
+| season_name | frequency_name | frequency_count |
+|-------------|----------------|-----------------|
+| Fall        | Quarterly      | 1               |
+| Fall        | Bi-Weekly      | 1               |
+| Spring      | Weekly         | 3               |
+| Summer      | Weekly         | 2               |
+| Winter      | Fortnightly    | 4               |
+
+
 ## Technologies Used
 
 - **SQL**: For creating tables and running queries.
