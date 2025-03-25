@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements a **data warehouse** for a **shopping domain** using the **Kimball methodology**. The data warehouse follows the **star schema** approach, which is one of the core concepts in data warehousing. The purpose of the project is to analyze shopping data, answering business questions related to customer behavior, product ratings, and purchase frequency.
+This project implements a **data warehouse** for a **shopping domain** using the **Kimball methodology**. The data warehouse follows the **star schema** approach, which is one of the core concepts in data warehousing. The purpose of the project is to analyze shopping data and answer business questions related to customer behavior, product ratings, and purchase frequency.
 
 ## Structure
 
@@ -39,38 +39,41 @@ This table stores the raw customer shopping data, which is imported from an S3 b
 
 Stores information about gender.
 
-- `ID` (INT): Unique identifier (references `customer_id` in the fact table).
+- `gender_id` (INT): Unique identifier (references `customer_id` in the fact table).
 - `gender_type` (VARCHAR): Gender type (Male/Female).
 
 ### 3. `dim_category` (Dimension Table)
 
 Stores information about product categories.
 
-- `ID` (INT): Unique identifier (references `customer_id` in the fact table).
-- `category` (VARCHAR): Product category (e.g., Clothing, Footwear).
+- `category_id` (INT): Unique identifier (references `category` in the fact table).
+- `category_name` (VARCHAR): Product category (e.g., Clothing, Footwear).
 
 ### 4. `dim_season` (Dimension Table)
 
 Stores information about the season during which a purchase occurred.
 
-- `ID` (INT): Unique identifier (references `customer_id` in the fact table).
-- `season` (VARCHAR): Season (e.g., Winter, Spring, Summer, Fall).
+- `season_id` (INT): Unique identifier (references `season` in the fact table).
+- `season_name` (VARCHAR): Season (e.g., Winter, Spring, Summer, Fall).
 
 ### 5. `dim_frequency` (Dimension Table)
 
 Stores information about the frequency of purchases.
 
-- `ID` (INT): Unique identifier (references `customer_id` in the fact table).
-- `frequency_of_purchases` (VARCHAR): Frequency (e.g., Weekly, Monthly, Annually).
+- `frequency_id` (INT): Unique identifier (references `frequency_of_purchases` in the fact table).
+- `frequency_name` (VARCHAR): Frequency (e.g., Weekly, Monthly, Annually).
 
 ### 6. `fact_table` (Fact Table)
 
 Stores transactional data, linking customer behavior to dimensions.
 
-- `ID` (INT): Unique identifier (references `customer_id`).
+- `fact_id` (INT): Unique identifier for each transaction (references `customer_id`).
 - `age` (INT): Customer's age.
 - `review_rating` (DECIMAL): Review rating for the product.
 - `previous_purchases` (INT): Number of previous purchases by the customer.
+- `category_id` (INT): Foreign key to `dim_category`.
+- `season_id` (INT): Foreign key to `dim_season`.
+- `frequency_id` (INT): Foreign key to `dim_frequency`.
 
 ## ETL Process
 
@@ -80,56 +83,63 @@ The ETL process involves the following steps:
 2. Insert transformed data into dimension tables (`dim_gender`, `dim_category`, `dim_season`, `dim_frequency`).
 3. Insert relevant data into the fact table (`fact_table`).
 
+### Example ETL Query to Load Data:
+
+```sql
+COPY dev.public.shopping FROM 's3url' 
+IAM_ROLE 'iam_role_url' 
+FORMAT AS CSV DELIMITER ',' QUOTE '"' 
+IGNOREHEADER 1 REGION 'your-s3-region';
+```
+
 ## Business Questions
 
 ### 1. Product Categories with High Review Ratings
 
-This query identifies **product categories** with an **average review rating** greater than the overall average review rating. It helps analyze which categories are receiving better feedback from customers.
+This query identifies **product categories** with an **MAX review rating**. It helps analyze which categories are receiving better feedback from customers.
 
 ```sql
 SELECT 
-    dc.category, 
-    AVG(ft.review_rating) AS avg_review_rating
+    dc.category_name, 
+    MAX(ft.review_rating) AS high_review_rating
 FROM 
     fact_table ft
 JOIN 
-    dim_category dc ON dc.ID = ft.ID
+    dim_category dc ON dc.category_id = ft.category_id
 GROUP BY 
-    dc.category
-HAVING 
-    AVG(ft.review_rating) > (SELECT AVG(review_rating) FROM fact_table)
+    dc.category_name
 ORDER BY 
-    avg_review_rating DESC;
+    high_review_rating DESC;
+
 ```
 ### 2. Most Frequent Purchase Frequency Per Season
 This query calculates the most frequent frequency of purchase for each season. It answers the business question of how frequently customers are purchasing products during different seasons.
 ```sql
 WITH ranked_frequencies AS (
     SELECT 
-        ds.season,
-        df.frequency_of_purchases, 
-        COUNT(df.frequency_of_purchases) AS frequency_count,
-        RANK() OVER (PARTITION BY ds.season ORDER BY COUNT(df.frequency_of_purchases) DESC) AS rank
+        ds.season_name,
+        df.frequency_name, 
+        COUNT(df.frequency_name) AS frequency_count,
+        RANK() OVER (PARTITION BY ds.season_name ORDER BY COUNT(df.frequency_name) DESC) AS rank
     FROM 
-        fact_table AS ft 
+        fact_table ft
     JOIN 
-        dim_season AS ds ON ds.ID = ft.ID
-    JOIN
-        dim_frequency AS df ON df.ID = ft.ID
+        dim_season ds ON ds.season_id = ft.season_id
+    JOIN 
+        dim_frequency df ON df.frequency_id = ft.frequency_id
     GROUP BY 
-        ds.season, df.frequency_of_purchases
+        ds.season_name, df.frequency_name
 )
-
 SELECT 
-    season, 
-    frequency_of_purchases, 
+    season_name, 
+    frequency_name, 
     frequency_count
 FROM 
     ranked_frequencies
 WHERE 
     rank = 1
 ORDER BY 
-    season;
+    season_name;
 ```
 ## Technologies Used
 
